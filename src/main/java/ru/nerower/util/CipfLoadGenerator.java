@@ -15,6 +15,7 @@ public class CipfLoadGenerator {
         return new CipfLoadGenerator(MAX_REQ_TIME, EXPONENT);
     }
 
+    // TODO разобраться как работает
     public CipfLoadGenerator(int maxK, double exponent) {
         double sum = 0;
         for (int k = 1; k <= maxK; k++) {

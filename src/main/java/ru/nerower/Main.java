@@ -11,14 +11,13 @@ public class Main {
     private static final int REQ_COUNT = 1 << 20;
 
     public static void main(String[] args) throws InterruptedException {
+        System.out.println("Start point");
         MetricsCollector collector = new PlainMetricsCollectorImpl();
-
         int[] values = CipfLoadGenerator.defaultGenerator().generateLoad(REQ_COUNT);
+        System.out.println("Request values generated");
+
         long median = new BunchRunner().measurePoint(collector, values, THREAD_COUNT);
         System.out.println("Median: " + median);
     }
-
-
-
 
 }
