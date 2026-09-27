@@ -7,7 +7,7 @@ public class PlainMetricsCollectorImpl implements MetricsCollector {
     private static final int BUCKETS_COUNT = 256;
     private static final int BUCKET_SIZE = 4;
 
-    private long[] buckets;
+    private final long[] buckets = new long[BUCKETS_COUNT];
     private long count;
     private long sum;
     private long min;

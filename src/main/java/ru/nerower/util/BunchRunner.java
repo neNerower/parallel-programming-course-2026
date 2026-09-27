@@ -63,12 +63,13 @@ public class BunchRunner {
 
         long[] speeds = new long[RUNS_COUNT];
         for (int i = 0; i < RUNS_COUNT; i++) {
+            System.out.println("Run thread " + i + " of " + RUNS_COUNT);
             speeds[i] = run(collector, values, threadsCount, RUNNING_SEC);
+            System.out.println(collector.snapshot().count());
         }
 
-        System.out.println(collector.snapshot().count());
-
         Arrays.sort(speeds);
+        // TODO медиана для четного кол-ва
         return speeds[RUNS_COUNT / 2];
     }
 
