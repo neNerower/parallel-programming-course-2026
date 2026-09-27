@@ -14,7 +14,7 @@ public class PlainMetricsCollectorImpl implements MetricsCollector {
     private long max;
 
     @Override
-    public void record(long value) {
+    public synchronized void record(long value) {
         buckets[Math.min((int) (value / BUCKET_SIZE), BUCKETS_COUNT - 1)]++;
         count++;
         sum += value;
@@ -23,7 +23,7 @@ public class PlainMetricsCollectorImpl implements MetricsCollector {
     }
 
     @Override
-    public Snapshot snapshot() {
+    public synchronized Snapshot snapshot() {
         return new Snapshot(
             buckets,
             count(),

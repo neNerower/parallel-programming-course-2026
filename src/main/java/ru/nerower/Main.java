@@ -7,7 +7,7 @@ import ru.nerower.util.CipfLoadGenerator;
 
 public class Main {
 
-    private static final int THREAD_COUNT = 1;
+    private static final int THREAD_COUNT = 8;
     private static final int REQ_COUNT = 1 << 20;
 
     public static void main(String[] args) throws InterruptedException {
