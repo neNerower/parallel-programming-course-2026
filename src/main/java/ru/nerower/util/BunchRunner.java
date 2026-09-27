@@ -63,7 +63,7 @@ public class BunchRunner {
 
         long[] speeds = new long[RUNS_COUNT];
         for (int i = 0; i < RUNS_COUNT; i++) {
-            System.out.println("Run thread " + i + " of " + RUNS_COUNT);
+            System.out.println("Run " + i + " of " + RUNS_COUNT);
             speeds[i] = run(collector, values, threadsCount, RUNNING_SEC);
             System.out.println(collector.snapshot().count());
         }
