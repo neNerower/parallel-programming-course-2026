@@ -36,8 +36,24 @@ public class PlainMetricsCollectorImpl implements MetricsCollector {
         count.incrementAndGet();
         sum.addAndGet(value);
 
-        min.updateAndGet(prev -> Math.min(prev, value));
-        max.updateAndGet(prev -> Math.max(prev, value));
+        long currentMin;
+        do {
+            currentMin = min.get();
+            if (value >= currentMin) {
+                break;
+            }
+        } while (min.compareAndSet(currentMin, value));
+
+        long currentMax;
+        do {
+            currentMax = max.get();
+            if (value <= currentMax) {
+                break;
+            }
+        } while (max.compareAndSet(currentMax, value));
+
+//        min.updateAndGet(prev -> Math.min(prev, value));
+//        max.updateAndGet(prev -> Math.max(prev, value));
     }
 
     @Override
