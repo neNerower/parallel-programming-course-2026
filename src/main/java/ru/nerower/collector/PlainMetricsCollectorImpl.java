@@ -3,70 +3,96 @@ package ru.nerower.collector;
 import java.util.ArrayList;
 import java.util.List;
 import ru.nerower.data.Snapshot;
-import ru.nerower.data.ThreadState;
+import ru.nerower.data.ThreadBuffers;
 
 public class PlainMetricsCollectorImpl implements MetricsCollector, AutoCloseable {
 
     private static final int BUCKETS_COUNT = 256;
     private static final int BUCKET_SIZE = 4;
 
-    private final List<ThreadState> allStates = new ArrayList<>();
-    private final Object listLock = new Object();
+    private final long[] globalBuckets = new long[BUCKETS_COUNT];
+    private long globalCount;
+    private long globalSum;
+    private long globalMin;
+    private long globalMax;
 
-    private final ThreadLocal<ThreadState> myState = ThreadLocal.withInitial(() -> {
-        ThreadState s = new ThreadState(BUCKETS_COUNT);
-        synchronized (listLock) {
+    private final List<ThreadBuffers> allStates = new ArrayList<>();
+    private final Object snapshotLock = new Object();
+
+    private final ThreadLocal<ThreadBuffers> myState = ThreadLocal.withInitial(() -> {
+        ThreadBuffers s = new ThreadBuffers(BUCKETS_COUNT);
+        synchronized (snapshotLock) {
             allStates.add(s);
         }
         return s;
     });
 
+    volatile int globalActiveBuffer = 0;
+
+
     @Override
     public void record(long value) {
-        ThreadState state = getLocalState();
+        ThreadBuffers buffers = getLocalBuffers();
+
+        int activeBufferId;
+        while (true) {
+            activeBufferId = globalActiveBuffer;
+            buffers.getInside().set(activeBufferId);
+            if (globalActiveBuffer == activeBufferId) {
+                break;
+            }
+            buffers.getInside().setRelease(ThreadBuffers.BufferType.NOWHERE.value);
+        }
 
         int bucketId = Math.min((int) (value / BUCKET_SIZE), BUCKETS_COUNT - 1);
-        state.getBuckets().setRelease(bucketId, state.getBuckets().getPlain(bucketId) + 1);
+        buffers.getBuckets()[activeBufferId][bucketId]++;
 
-        state.getCount().setRelease(state.getCount().getPlain() + 1);
-        state.getSum().setRelease(state.getSum().getPlain() + value);
+        buffers.getCount()[activeBufferId]++;
+        buffers.getSum()[activeBufferId] += value;
 
-        if (value < state.getMin().getPlain()) {
-            state.getMin().setRelease(value);
+        if (value < buffers.getMin()[activeBufferId]) {
+            buffers.getMin()[activeBufferId] = value;
         }
-        if (value > state.getMax().getPlain()) {
-            state.getMax().setRelease(value);
+        if (value > buffers.getMax()[activeBufferId]) {
+            buffers.getMax()[activeBufferId] = value;
         }
+
+        buffers.getInside().setRelease(ThreadBuffers.BufferType.NOWHERE.value);
     }
 
     @Override
     public Snapshot snapshot() {
-        List<ThreadState> copyOfStates = new ArrayList<>(allStates);
 
-        long[] out = new long[256];
-        long count = 0;
-        long sum = 0;
-        long min = Long.MAX_VALUE;
-        long max = 0;
+        synchronized (snapshotLock) {
+            int toReadBufId = globalActiveBuffer;
+            globalActiveBuffer = 1 - toReadBufId;
 
-        for (ThreadState s : copyOfStates) {
-            for (int i = 0; i < 256; i++) {
-                out[i] += s.getBuckets().get(i);
+            for (ThreadBuffers buffers : allStates) {
+                while (buffers.getInside().get() == toReadBufId) {
+                    Thread.onSpinWait();
+                }
+
+                for (int i = 0; i < globalBuckets.length; i++) {
+                    globalBuckets[i] += buffers.getBuckets()[toReadBufId][i];
+                }
+
+                globalCount += buffers.getCount()[toReadBufId];
+                globalSum += buffers.getSum()[toReadBufId];
+
+                globalMin += Math.min(buffers.getMin()[toReadBufId], globalMin);
+                globalMax += Math.max(buffers.getMax()[toReadBufId], globalMax);
             }
-            count += s.getCount().get();
-            sum   += s.getSum().get();
-            min    = Math.min(min, s.getMin().get());
-            max    = Math.max(max, s.getMax().get());
+
         }
 
-        long p50 = computePercentile(out, count, 0.50);
-        long p99 = computePercentile(out, count, 0.99);
+        long p50 = computePercentile(globalBuckets, globalCount, 0.50);
+        long p99 = computePercentile(globalBuckets, globalCount, 0.99);
 
-        return new Snapshot(out, count, sum, min, max, p50, p99);
+        return new Snapshot(globalBuckets, globalCount, globalSum, globalMin, globalMax, p50, p99);
 
     }
 
-    private ThreadState getLocalState() {
+    private ThreadBuffers getLocalBuffers() {
         return myState.get();
     }
 
