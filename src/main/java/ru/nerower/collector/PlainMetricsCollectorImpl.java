@@ -1,106 +1,77 @@
 package ru.nerower.collector;
 
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.stream.Stream;
+import java.util.ArrayList;
+import java.util.List;
 import ru.nerower.data.Snapshot;
+import ru.nerower.data.ThreadState;
 
-public class PlainMetricsCollectorImpl implements MetricsCollector {
+public class PlainMetricsCollectorImpl implements MetricsCollector, AutoCloseable {
 
     private static final int BUCKETS_COUNT = 256;
     private static final int BUCKET_SIZE = 4;
-    private static final int LOCK_STRIPES_COUNT = 16;
 
-    private final long[] buckets;
-    private final ReentrantLock[] stripedLocks;
+    private final List<ThreadState> allStates = new ArrayList<>();
+    private final Object listLock = new Object();
 
-    private final AtomicLong count = new AtomicLong(0);
-    private final AtomicLong sum = new AtomicLong(0);
-    private final AtomicLong min = new AtomicLong(0);
-    private final AtomicLong max = new AtomicLong(0);
-
-    public PlainMetricsCollectorImpl() {
-        this.buckets = new long[BUCKETS_COUNT];
-        this.stripedLocks = Stream.generate(ReentrantLock::new)
-            .limit(LOCK_STRIPES_COUNT)
-            .toArray(ReentrantLock[]::new);
-    }
+    private final ThreadLocal<ThreadState> myState = ThreadLocal.withInitial(() -> {
+        ThreadState s = new ThreadState(BUCKETS_COUNT);
+        synchronized (listLock) {
+            allStates.add(s);
+        }
+        return s;
+    });
 
     @Override
     public void record(long value) {
+        ThreadState state = getLocalState();
+
         int bucketId = Math.min((int) (value / BUCKET_SIZE), BUCKETS_COUNT - 1);
-        stripedLocks[bucketId % LOCK_STRIPES_COUNT].lock();
-        buckets[bucketId]++;
-        stripedLocks[bucketId % LOCK_STRIPES_COUNT].unlock();
+        state.getBuckets().setRelease(bucketId, state.getBuckets().getPlain(bucketId) + 1);
 
-        count.incrementAndGet();
-        sum.addAndGet(value);
+        state.getCount().setRelease(state.getCount().getPlain() + 1);
+        state.getSum().setRelease(state.getSum().getPlain() + value);
 
-        long currentMin;
-        do {
-            currentMin = min.get();
-            if (value >= currentMin) {
-                break;
-            }
-        } while (min.compareAndSet(currentMin, value));
-
-        long currentMax;
-        do {
-            currentMax = max.get();
-            if (value <= currentMax) {
-                break;
-            }
-        } while (max.compareAndSet(currentMax, value));
-
-//        min.updateAndGet(prev -> Math.min(prev, value));
-//        max.updateAndGet(prev -> Math.max(prev, value));
+        if (value < state.getMin().getPlain()) {
+            state.getMin().setRelease(value);
+        }
+        if (value > state.getMax().getPlain()) {
+            state.getMax().setRelease(value);
+        }
     }
 
     @Override
     public Snapshot snapshot() {
-        return new Snapshot(
-            buckets(),
-            count(),
-            sum(),
-            min(),
-            max(),
-            percentile(50),
-            percentile(99)
-        );
-    }
+        List<ThreadState> copyOfStates = new ArrayList<>(allStates);
 
-    private long[] buckets() {
-        long[] snapBuckets = new long[buckets.length];
-        for (int groupId = 0; groupId < LOCK_STRIPES_COUNT; groupId++) {
-            stripedLocks[groupId].lock();
+        long[] out = new long[256];
+        long count = 0;
+        long sum = 0;
+        long min = Long.MAX_VALUE;
+        long max = 0;
 
-            for (int bucketId = groupId; bucketId < BUCKETS_COUNT; bucketId += LOCK_STRIPES_COUNT) {
-                snapBuckets[bucketId] = buckets[bucketId];
+        for (ThreadState s : copyOfStates) {
+            for (int i = 0; i < 256; i++) {
+                out[i] += s.getBuckets().get(i);
             }
-
-            stripedLocks[groupId].unlock();
+            count += s.getCount().get();
+            sum   += s.getSum().get();
+            min    = Math.min(min, s.getMin().get());
+            max    = Math.max(max, s.getMax().get());
         }
-        return snapBuckets;
+
+        long p50 = computePercentile(out, count, 0.50);
+        long p99 = computePercentile(out, count, 0.99);
+
+        return new Snapshot(out, count, sum, min, max, p50, p99);
+
     }
 
-    private long count() {
-        return count.longValue();
+    private ThreadState getLocalState() {
+        return myState.get();
     }
 
-    private long sum() {
-        return sum.longValue();
-    }
-
-    private long min() {
-        return min.longValue();
-    }
-
-    private long max() {
-        return max.longValue();
-    }
-
-    private long percentile(int percentile) {
-        long limit = count() * percentile;
+    private long computePercentile(long[] buckets, long count, double percentile) {
+        long limit = (long) (count * percentile);
         long currentCount = 0;
 
         for (long bucket : buckets) {
@@ -113,4 +84,8 @@ public class PlainMetricsCollectorImpl implements MetricsCollector {
         return limit * BUCKET_SIZE;
     }
 
+    @Override
+    public void close() {
+        myState.remove();
+    }
 }
