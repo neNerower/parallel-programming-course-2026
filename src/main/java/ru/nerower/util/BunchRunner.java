@@ -20,10 +20,11 @@ public class BunchRunner {
         AtomicBoolean stopFlag = new AtomicBoolean(false);
         long[] opsCounts = new long[threadsCount];
 
+        Thread[] threads = new Thread[threadsCount];
         for (int k = 0; k < threadsCount; k++) {
             int idx = k;
 
-            Thread.startVirtualThread(() -> {
+            threads[k] = Thread.startVirtualThread(() -> {
                 int localCount = 0;
                 int i = idx * 1000;
 
@@ -51,6 +52,10 @@ public class BunchRunner {
         Thread.sleep(seconds * 1_000L);
         stopFlag.set(true);
         LocalTime t1 = now();
+
+        for (Thread thread : threads) {
+            thread.join();
+        }
 
         return Arrays.stream(opsCounts).sum() / (t1.getSecond() - t0.getSecond());
     }

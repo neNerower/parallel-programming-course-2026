@@ -8,7 +8,7 @@ import ru.nerower.util.ConsistencyRunner;
 
 public class Main {
 
-    private static final int THREAD_COUNT = 1;
+    private static final int THREAD_COUNT = 8;
     private static final int REQ_COUNT = 1 << 20;
 
     public static void main(String[] args) throws InterruptedException {
@@ -17,11 +17,10 @@ public class Main {
         int[] values = CipfLoadGenerator.defaultGenerator().generateLoad(REQ_COUNT);
         System.out.println("Request values generated");
 
-        double inaccuracy = new ConsistencyRunner().measurePoint(collector, values, THREAD_COUNT);
-        System.out.println("Inaccuracy: " + inaccuracy);
+        new ConsistencyRunner().measurePoint(collector, values, THREAD_COUNT);
 
-//        long median = new BunchRunner().measurePoint(collector, values, THREAD_COUNT);
-//        System.out.println("Median: " + median);
+        long median = new BunchRunner().measurePoint(collector, values, THREAD_COUNT);
+        System.out.println("Median: " + median);
     }
 
 }
