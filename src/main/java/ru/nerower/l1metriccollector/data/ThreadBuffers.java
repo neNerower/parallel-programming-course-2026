@@ -1,4 +1,4 @@
-package ru.nerower.data;
+package ru.nerower.l1metriccollector.data;
 
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;

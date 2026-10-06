@@ -1,4 +1,4 @@
-package ru.nerower.util;
+package ru.nerower.l1metriccollector.util;
 
 import static java.time.LocalTime.now;
 
@@ -6,7 +6,7 @@ import java.time.LocalTime;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
-import ru.nerower.collector.MetricsCollector;
+import ru.nerower.l1metriccollector.collector.MetricsCollector;
 
 public class BunchRunner {
 

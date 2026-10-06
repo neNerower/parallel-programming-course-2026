@@ -1,10 +1,10 @@
-package ru.nerower.util;
+package ru.nerower.l1metriccollector.util;
 
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
-import ru.nerower.collector.MetricsCollector;
-import ru.nerower.data.Snapshot;
+import ru.nerower.l1metriccollector.collector.MetricsCollector;
+import ru.nerower.l1metriccollector.data.Snapshot;
 
 public class ConsistencyRunner {
 

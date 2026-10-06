@@ -1,4 +1,4 @@
-package ru.nerower.data;
+package ru.nerower.l1metriccollector.data;
 
 public record Snapshot(
     long[] buckets,

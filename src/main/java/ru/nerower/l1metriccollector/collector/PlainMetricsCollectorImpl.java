@@ -1,9 +1,9 @@
-package ru.nerower.collector;
+package ru.nerower.l1metriccollector.collector;
 
 import java.util.ArrayList;
 import java.util.List;
-import ru.nerower.data.Snapshot;
-import ru.nerower.data.ThreadBuffers;
+import ru.nerower.l1metriccollector.data.Snapshot;
+import ru.nerower.l1metriccollector.data.ThreadBuffers;
 
 public class PlainMetricsCollectorImpl implements MetricsCollector, AutoCloseable {
 

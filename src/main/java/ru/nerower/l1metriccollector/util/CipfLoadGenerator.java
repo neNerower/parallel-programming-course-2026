@@ -1,4 +1,4 @@
-package ru.nerower.util;
+package ru.nerower.l1metriccollector.util;
 
 import java.util.Random;
 import java.util.stream.IntStream;
