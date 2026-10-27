@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 
 /* Этап 1: планировщик, который ведёт настоящие потоки строго по одному (передача хода через семафоры).
  * Этап 2: обнаружение deadlock в главном цикле и корректное завершение застрявших потоков.
@@ -43,11 +44,19 @@ public final class Scheduler {
 
         BooleanSupplier waitingFor;
 
+        Throwable failure;
+
         Worker(Scheduler scheduler, int id, Runnable body) {
             this.scheduler = scheduler;
             this.id = id;
             this.body = body;
         }
+    }
+
+    /*
+     * Внутреннее исключение для завершения потока, если планировщик прервал прогон.
+     */
+    private static final class StopRun extends RuntimeException {
     }
 
     public Scheduler() {
@@ -99,9 +108,12 @@ public final class Scheduler {
                  * этап 2. Пока просто не допускаем зависания
                  */
                 if (enabled.isEmpty()) {
-                    throw new IllegalStateException(
-                        "Нет доступных потоков, но прогон ещё не завершён"
-                    );
+                    deadlock = locks.stream()
+                        .filter(lock -> !lock.isFree())
+                        .map(lock -> "%s:%s".formatted(lock.name, letter(lock.getOwner())))
+                        .collect(Collectors.joining(", "));
+                    deadlock = "held={" + deadlock + "}";
+                    break;
                 }
 
                 int chosen = strategy.pick(enabled, last);
@@ -116,22 +128,32 @@ public final class Scheduler {
                 events.acquireUninterruptibly();
             }
         } finally {
+            aborted = true;
+
             for (Worker worker : workers) {
                 worker.permit.release();
             }
+
+            boolean interrupted = false;
 
             for (Worker worker : workers) {
                 if (worker.thread == null) {
                     continue;
                 }
 
-                try {
-                    worker.thread.join();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                while (true) {
+                    try {
+                        worker.thread.join();
+                        break;
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    }
                 }
             }
 
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -142,6 +164,11 @@ public final class Scheduler {
             // Стартовая пауза: ждём первого решения стратегии
             pause(worker);
             worker.body.run();
+        } catch (StopRun ignored) {
+            // Планировщик завершает прогон.
+        } catch (Throwable failure) {
+            worker.failure = failure;
+            failure.printStackTrace();
         } finally {
             worker.finished = true;
             CURRENT.remove();
@@ -157,6 +184,11 @@ public final class Scheduler {
     private void pause(Worker worker) {
         events.release();
         worker.permit.acquireUninterruptibly();
+
+        if (aborted) {
+            throw new StopRun();
+        }
+
         worker.touched = false;
     }
 
