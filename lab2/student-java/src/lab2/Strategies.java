@@ -11,19 +11,32 @@ public final class Strategies {
     /** Всегда первый поток из enabled. */
     public static final class FirstAlive implements Strategy {
         public int pick(List<Integer> enabled, int last) {
-            throw new UnsupportedOperationException("TODO этап 1: FirstAlive.pick");
+            return enabled.getFirst();
         }
     }
 
     /** Проигрывает трассу: на i-м решении выбирает поток trace[i] ('A' -> 0, 'B' -> 1). */
     public static final class Replay implements Strategy {
-        public Replay(String trace) { }
+        private final String trace;
+        private int ptr;
+
+        public Replay(String trace) {
+            this.trace = trace;
+            this.ptr = 0;
+        }
 
         /** Сбросить позицию в трассе перед прогоном. */
-        public void beginRun() { }
+        public void beginRun() {
+            this.ptr = 0;
+        }
 
         public int pick(List<Integer> enabled, int last) {
-            throw new UnsupportedOperationException("TODO этап 2: Replay.pick");
+            char targetName = trace.charAt(ptr++);
+            int target = targetName - 'A';
+            if (!enabled.contains(target)) {
+                throw new IllegalStateException("Запрашиваемый поток " + targetName + "не активен");
+            }
+            return target;
         }
     }
 
