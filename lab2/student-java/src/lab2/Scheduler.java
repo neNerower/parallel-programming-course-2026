@@ -23,6 +23,10 @@ public final class Scheduler {
     private final List<Worker> workers = new ArrayList<>();
     private final StringBuilder trace = new StringBuilder();
 
+    private final List<SchedLock> locks = new ArrayList<>();
+
+    private volatile boolean aborted;
+
     private static final class Worker {
         final Scheduler scheduler;
         final int id;
@@ -154,6 +158,50 @@ public final class Scheduler {
         events.release();
         worker.permit.acquireUninterruptibly();
         worker.touched = false;
+    }
+
+    void registerLock(SchedLock lock) {
+        locks.add(lock);
+    }
+
+    public static void lock(SchedLock lock) {
+        Worker worker = currentWorker();
+
+        if (worker.touched) {
+            worker.scheduler.pause(worker);
+        }
+
+        while (true) {
+            if (lock.isFree()) {
+                lock.setOwner(worker.id);
+                logOperation("lock " + lock.name);
+                worker.touched = true;
+                return;
+            }
+
+            try {
+                worker.waitingFor = lock::isFree;
+                worker.scheduler.pause(worker);
+            } finally {
+                worker.waitingFor = null;
+            }
+        }
+    }
+
+    public static void unlock(SchedLock lock) {
+        Worker worker = currentWorker();
+
+        if (worker.touched) {
+            worker.scheduler.pause(worker);
+        }
+
+        if (lock.getOwner() != worker.id) {
+            throw new IllegalStateException();
+        }
+
+        lock.setOwner(-1);
+        logOperation("unlock " + lock.name);
+        worker.touched = true;
     }
 
     /*
