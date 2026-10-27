@@ -2,6 +2,7 @@ package lab2;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 import java.util.function.BooleanSupplier;
 
 /* Этап 1: планировщик, который ведёт настоящие потоки строго по одному (передача хода через семафоры).
@@ -15,30 +16,206 @@ public final class Scheduler {
     /** null, если deadlock не было; иначе "held={a:A, b:B}" (этап 2). */
     String deadlock;
 
-    public Scheduler() { }
+    private static final ThreadLocal<Worker> CURRENT = new ThreadLocal<>();
 
-    /** Зарегистрировать поток. Потоки получают буквы A, B, C… в порядке вызова spawn. */
+    private final Semaphore events = new Semaphore(0);
+
+    private final List<Worker> workers = new ArrayList<>();
+    private final StringBuilder trace = new StringBuilder();
+
+    private static final class Worker {
+        final Scheduler scheduler;
+        final int id;
+        final Runnable body;
+
+        // Разрешение этому потоку продолжить выполнение
+        final Semaphore permit = new Semaphore(0);
+
+        Thread thread;
+        boolean finished;
+
+        // Была ли общая операция после последней паузы
+        boolean touched;
+
+        BooleanSupplier waitingFor;
+
+        Worker(Scheduler scheduler, int id, Runnable body) {
+            this.scheduler = scheduler;
+            this.id = id;
+            this.body = body;
+        }
+    }
+
+    public Scheduler() {
+    }
+
     public void spawn(Runnable body) {
-        throw new UnsupportedOperationException("TODO этап 1: Scheduler.spawn");
+        workers.add(new Worker(this, workers.size(), body));
     }
 
-    /** Запустить потоки и вести их по одному: на каждой паузе спросить strategy.pick(enabled, last). */
     public void run(Strategy strategy) {
-        throw new UnsupportedOperationException("TODO этап 1: Scheduler.run");
+        try {
+            // Запускаем потоки по одному и ждём, пока каждый остановится на стартовой паузе
+            // Пользовательский body пока не выполняется
+            for (Worker worker : workers) {
+                worker.thread = new Thread(
+                    () -> execute(worker),
+                    "lab2-" + letter(worker.id)
+                );
+
+                worker.thread.start();
+                events.acquireUninterruptibly();
+            }
+
+            int last = -1;
+
+            while (true) {
+                List<Integer> enabled = new ArrayList<>();
+                boolean allFinished = true;
+
+                for (Worker worker : workers) {
+                    if (worker.finished) {
+                        continue;
+                    }
+
+                    allFinished = false;
+
+                    if (worker.waitingFor == null
+                        || worker.waitingFor.getAsBoolean()) {
+                        enabled.add(worker.id);
+                    }
+                }
+
+                if (allFinished) {
+                    break;
+                }
+
+                /*
+                 * Полное обнаружение deadlock с описанием локов —
+                 * этап 2. Пока просто не допускаем зависания
+                 */
+                if (enabled.isEmpty()) {
+                    throw new IllegalStateException(
+                        "Нет доступных потоков, но прогон ещё не завершён"
+                    );
+                }
+
+                int chosen = strategy.pick(enabled, last);
+
+                trace.append(letter(chosen));
+                last = chosen;
+
+                // Разрешаем выбранному потоку сделать следующий шаг
+                workers.get(chosen).permit.release();
+
+                // Ждём его следующей паузы или завершения
+                events.acquireUninterruptibly();
+            }
+        } finally {
+            for (Worker worker : workers) {
+                worker.permit.release();
+            }
+
+            for (Worker worker : workers) {
+                if (worker.thread == null) {
+                    continue;
+                }
+
+                try {
+                    worker.thread.join();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+        }
     }
 
-    /** Трасса прогона: буквы потоков, выбранных во всех решениях подряд, например "AAAABB". */
+    private void execute(Worker worker) {
+        CURRENT.set(worker);
+
+        try {
+            // Стартовая пауза: ждём первого решения стратегии
+            pause(worker);
+            worker.body.run();
+        } finally {
+            worker.finished = true;
+            CURRENT.remove();
+            // Завершение тоже возвращает управление планировщику
+            events.release();
+        }
+    }
+
+    /*
+     * Реальная передача управления:
+     * сообщаем планировщику о паузе и засыпаем
+     */
+    private void pause(Worker worker) {
+        events.release();
+        worker.permit.acquireUninterruptibly();
+        worker.touched = false;
+    }
+
+    /*
+     * Вызывается в Shared перед чтением или записью
+     */
+    static void beforeSharedAccess() {
+        Worker worker = currentWorker();
+
+        if (worker.touched) {
+            worker.scheduler.pause(worker);
+        }
+
+        worker.touched = true;
+    }
+
+    static void logOperation(String operation) {
+        Worker worker = currentWorker();
+        Scheduler scheduler = worker.scheduler;
+
+        if (scheduler.logging) {
+            scheduler.log.add(letter(worker.id) + "  " + operation);
+        }
+    }
+
+    private static Worker currentWorker() {
+        return CURRENT.get();
+    }
+
+    private static char letter(int id) {
+        return (char) ('A' + id);
+    }
+
     public String traceString() {
-        throw new UnsupportedOperationException("TODO этап 1: Scheduler.traceString");
+        return trace.toString();
     }
 
-    /** window() из тестовых программ: пауза перед следующей операцией с общими данными обязательна. */
     public static void point() {
-        throw new UnsupportedOperationException("TODO этап 1: Scheduler.point");
+        Worker worker = currentWorker();
+
+        // Требуем паузу перед следующей общей операцией
+        worker.touched = true;
+
+        logOperation("window");
     }
 
-    /** Ждать, пока cond не станет true. До этого поток не попадает в enabled. */
     public static void await(BooleanSupplier cond) {
-        throw new UnsupportedOperationException("TODO этап 1: Scheduler.await");
+        Worker worker = currentWorker();
+
+        boolean ready = cond.getAsBoolean();
+
+        if (worker.touched || !ready) {
+            worker.waitingFor = cond;
+
+            try {
+                worker.scheduler.pause(worker);
+            } finally {
+                worker.waitingFor = null;
+            }
+        }
+
+        logOperation("await done");
+
+        worker.touched = true;
     }
 }
